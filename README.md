@@ -53,7 +53,7 @@ The users are connected to different VMs but chat together.
 | `/where` | Shows the pid and node of the channel process |
 | **Create channels**: the **+** next to "Text channels" or "Voice channels" | The channel list is replicated on every node (`Demo.Chat.Directory`). A new channel is sent to every node, and copies are merged as a set union (a grow-only set, a simple CRDT), so there's no central owner. Channels survive losing the node they were created on, and nodes swap full lists when they connect, so newcomers catch up. |
 | **GIF picker** (the GIF button in the message box) | Search goes through the server (`GET /gifs?q=`), so the GIPHY key never reaches browsers. Each node caches results in ETS for 10 minutes. GIF messages are only accepted from GIPHY's media domain. |
-| **Voice channels** (Lounge, Stand-up), with speaking rings, mute, deafen, join/leave chimes and **video** (camera button in the voice bar) | Audio goes browser-to-browser over WebRTC. The cluster is the signaling server: who is in a room is a `:pg` group, and offers, answers and ICE candidates are routed to the other person's socket process, whichever node it's on. If your node dies mid-call, your browser fails over and rejoins the room. |
+| **Voice channels** (Lounge, Stand-up), with speaking rings, mute, deafen, join/leave chimes, **video** and **screen sharing** (camera and screen buttons in the voice bar) | Audio goes browser-to-browser over WebRTC. The cluster is the signaling server: who is in a room is a `:pg` group, and offers, answers and ICE candidates are routed to the other person's socket process, whichever node it's on. If your node dies mid-call, your browser fails over and rejoins the room. |
 
 GIF search uses [GIPHY](https://developers.giphy.com/) (Google shut down the
 Tenor API in June 2026). Get a free API key there and start the chat with it:
@@ -80,6 +80,11 @@ self-signed: accept the browser warning once per node. It's kept in `.chat_cert/
 and reused until your IP addresses change. Voice is peer-to-peer without
 STUN/TURN servers, so it works between devices on the same network. Each person
 connects to every other person in the room, which suits small groups.
+
+Video is capped per stream: cameras at 500 kbps, screen shares at 1.5 Mbps and
+15 fps (tuned for sharp text). Each person sends one stream to every other
+person, so a 4-person call with cameras on needs about 1.5 Mbps up and down
+per person, plus 1.5 Mbps for each screen being shared.
 Use `--host 127.0.0.1` to keep it on this machine. Erlang distribution between
 the nodes always stays on localhost, because the demo's cookie is hard-coded
 and a reachable node with a known cookie lets anyone run code on it.

@@ -4,7 +4,7 @@ defmodule Demo.Chat.Presence do
 
     * every WebSocket process joins `{:presence, name, color}`
     * every chat node's Presence process joins `{:chat_node, http_port, https_port}`
-    * every voice participant joins `{:voice, room, id, name, color, muted?, camera?}`
+    * every voice participant joins `{:voice, room, id, name, color, muted?, camera?, screen?}`
 
   `:pg` removes members automatically when their process or node dies, and
   `:pg.monitor_scope/1` tells us about every change, so presence is always
@@ -34,7 +34,7 @@ defmodule Demo.Chat.Presence do
       |> Enum.sort_by(&String.downcase(&1.name))
 
     voice =
-      for {:voice, room, id, name, color, muted, video} = g <- groups,
+      for {:voice, room, id, name, color, muted, video, screen} = g <- groups,
           pid <- :pg.get_members(g) do
         %{
           room: room,
@@ -43,6 +43,7 @@ defmodule Demo.Chat.Presence do
           color: color,
           muted: muted,
           video: video,
+          screen: screen,
           node: node(pid)
         }
       end

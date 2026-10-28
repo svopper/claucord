@@ -38,6 +38,7 @@ defmodule Demo.Chat.Socket do
       voice: nil,
       muted: false,
       video: false,
+      screen: false,
       subscribed: MapSet.new(text_channels)
     }
 
@@ -126,16 +127,18 @@ defmodule Demo.Chat.Socket do
 
   defp handle_client(%{"type" => "voice_leave"}, state), do: {:ok, leave_voice(state)}
 
-  # Mic and camera on/off. Both are part of the :pg group key, so presence
-  # tells everyone about the change.
-  defp handle_client(%{"type" => "voice_state", "muted" => muted, "video" => video}, state)
+  # Mic, camera and screen share on/off. They are part of the :pg group key,
+  # so presence tells everyone about the change.
+  defp handle_client(%{"type" => "voice_state", "muted" => muted, "video" => video} = msg, state)
        when is_boolean(muted) and is_boolean(video) do
+    screen = msg["screen"] == true
+
     case state do
       %{voice: nil} ->
-        {:ok, %{state | muted: muted, video: video}}
+        {:ok, %{state | muted: muted, video: video, screen: screen}}
 
       %{voice: room} ->
-        state = %{leave_voice(state) | voice: room, muted: muted, video: video}
+        state = %{leave_voice(state) | voice: room, muted: muted, video: video, screen: screen}
         :ok = :pg.join(voice_group(state), self())
         {:ok, state}
     end
@@ -182,7 +185,7 @@ defmodule Demo.Chat.Socket do
     %{state | subscribed: MapSet.union(state.subscribed, MapSet.new(new))}
   end
 
-  defp voice_group(s), do: {:voice, s.voice, s.id, s.name, s.color, s.muted, s.video}
+  defp voice_group(s), do: {:voice, s.voice, s.id, s.name, s.color, s.muted, s.video, s.screen}
 
   defp leave_voice(%{voice: nil} = state), do: state
 

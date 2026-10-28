@@ -277,6 +277,12 @@
   .tile.speaking { box-shadow: 0 0 0 3px var(--online); }
   .tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
   .tile video.mirror { transform: scaleX(-1); }
+  /* Screen shares: full width, shown whole (letterboxed), before the cameras. */
+  .stage.has-screen { max-height: 72vh; }
+  .tile.screen { order: -1; grid-column: 1 / -1; justify-self: center; width: min(100%, calc(56vh * 16 / 9)); }
+  .tile.screen video { object-fit: contain; }
+  .ctrl.on { color: var(--online); }
+  .live { font: 800 9px/1 ui-sans-serif, system-ui, sans-serif; letter-spacing: .04em; color: #fff; background: var(--danger); border-radius: 4px; padding: 3px 4px; flex: none; }
   .tile-name { position: absolute; left: 8px; bottom: 8px; background: #000a; color: #fff; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 4px; }
   .vp svg.cam { color: var(--muted); }
 
@@ -408,7 +414,7 @@
     users: [], nodes: [], typing: {}, ws: null, wanted: false, retries: 0, cmdSel: 0,
     // voice
     voiceRooms: [], voice: [], myVoice: null, muted: false, deaf: false,
-    localStream: null, camStream: null, pcs: new Map(), gifResults: [],
+    localStream: null, camStream: null, screenStream: null, pcs: new Map(), gifResults: [],
   };
 
   // Every node serves HTTP on `port` and HTTPS on `https_port`; stay on our scheme.
@@ -422,6 +428,7 @@
     headOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M4.3 3 3 4.3l2.4 2.4A9 9 0 0 0 3 12v7a2 2 0 0 0 2 2h3v-8H5v-1c0-1.4.4-2.8 1.2-3.9L16 18v3h3c.2 0 .4 0 .6-.1l.1.1 1.3-1.3L4.3 3zM12 5a7 7 0 0 1 7 7v1h-3v1.2l5 5V12a9 9 0 0 0-14.3-7.3l1.4 1.4A7 7 0 0 1 12 5z"/></svg>`,
     cam: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 10.5V7a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-3.5l4 4v-11l-4 4z"/></svg>`,
     camOff: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M21 6.5l-4 4V7a1 1 0 0 0-1-1H9.8L21 17.2V6.5zM3.3 2 2 3.3 4.7 6H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12c.2 0 .4-.1.5-.2l3.2 3.2 1.3-1.3L3.3 2z"/></svg>`,
+    screen: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 4h18a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1h-7v2h3v2H7v-2h3v-2H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1zm1 2v9h16V6H4zm8 1.5 3.5 3.5H13v2.5h-2V11H8.5L12 7.5z"/></svg>`,
     hang: `<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 9c-1.6 0-3.2.3-4.6.7v3.1c0 .4-.2.7-.6.9-1 .5-1.9 1.1-2.6 1.8-.2.2-.4.3-.7.3s-.5-.1-.7-.3L.3 13c-.2-.2-.3-.4-.3-.7s.1-.5.3-.7A16.9 16.9 0 0 1 12 7c4.6 0 8.8 1.8 11.7 4.6.2.2.3.4.3.7s-.1.5-.3.7l-2.5 2.5c-.2.2-.4.3-.7.3s-.5-.1-.7-.3c-.8-.7-1.7-1.3-2.6-1.8-.3-.2-.6-.5-.6-.9V9.7C15.2 9.3 13.6 9 12 9z"/></svg>`,
   };
 
@@ -623,7 +630,7 @@
         <div class="vpeople">${people.map((p) => `
           <div class="vp" data-voice-id="${esc(p.id)}">
             <div class="avatar xs" style="background:${p.color}">${initial(p.name)}</div>
-            <span class="n">${esc(p.name)}</span>${p.video ? ICON.cam.replace("<svg", '<svg class="cam"') : ""}${p.muted ? ICON.micOff : ""}
+            <span class="n">${esc(p.name)}</span>${p.screen ? '<span class="live" title="Sharing their screen">LIVE</span>' : ""}${p.video ? ICON.cam.replace("<svg", '<svg class="cam"') : ""}${p.muted ? ICON.micOff : ""}
             <span class="tag" title="${esc(p.node)}">${esc(shortNode(p.node).replace(/^chat/, ""))}</span>
           </div>`).join("")}</div>`;
     }).join("");
@@ -641,6 +648,7 @@
       </div>
       <div class="ctrls">
         <button class="ctrl ${S.camStream ? "" : "off"}" id="camBtn" title="${S.camStream ? "Turn camera off" : "Turn camera on"}" aria-label="${S.camStream ? "Turn camera off" : "Turn camera on"}">${S.camStream ? ICON.cam : ICON.camOff}</button>
+        ${navigator.mediaDevices?.getDisplayMedia ? `<button class="ctrl ${S.screenStream ? "on" : ""}" id="screenBtn" title="${S.screenStream ? "Stop sharing" : "Share your screen"}" aria-label="${S.screenStream ? "Stop sharing" : "Share your screen"}">${ICON.screen}</button>` : ""}
         <button class="ctrl hang" id="hangBtn" title="Disconnect" aria-label="Disconnect">${ICON.hang}</button>
       </div>`;
   }
@@ -681,6 +689,8 @@
     S.localStream = null;
     S.camStream?.getTracks().forEach((t) => t.stop());
     S.camStream = null;
+    S.screenStream?.getTracks().forEach((t) => t.stop());
+    S.screenStream = null;
     stopLevel("me");
     S.myVoice = null;
     sendVoiceState();
@@ -705,16 +715,17 @@
     renderVoice();
   }
 
-  // Every call has an audio slot and a video slot. The video slot exists from
-  // the start, so turning the camera on or off is a replaceTrack(): no
-  // renegotiation, and nobody's audio is interrupted.
+  // Every call has an audio slot and two video slots: camera, then screen.
+  // The slots exist from the start, so turning the camera or a screen share on
+  // or off is a replaceTrack(): no renegotiation, and nobody's audio is
+  // interrupted.
   function createPeer(id) {
     // No STUN/TURN servers: devices on the same network reach each other directly.
     const pc = new RTCPeerConnection({ iceServers: [] });
     const audio = new Audio();
     audio.autoplay = true;
     audio.muted = S.deaf;
-    const entry = { pc, audio, video: null, videoSender: null, pending: [] };
+    const entry = { pc, audio, video: null, screen: null, cameraSender: null, screenSender: null, pending: [] };
     pc.onicecandidate = (e) => e.candidate && send({ type: "signal", to: id, data: { candidate: e.candidate.toJSON() } });
     pc.ontrack = (e) => {
       if (e.track.kind === "audio") {
@@ -723,26 +734,49 @@
         audio.play().catch(() => {});
         watchLevel(id, stream);
       } else {
-        entry.video = new MediaStream([e.track]);
+        // Which slot? Video transceivers are in the same order on both sides.
+        const slots = pc.getTransceivers().filter((t) => t.receiver.track.kind === "video");
+        entry[slots.indexOf(e.transceiver) === 1 ? "screen" : "video"] = new MediaStream([e.track]);
         renderStage();
       }
     };
-    pc.onconnectionstatechange = () => renderVoice();
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "connected") applyCaps(entry);
+      renderVoice();
+    };
     S.pcs.set(id, entry);
     return entry;
   }
 
-  // Put our mic and camera into the call. The caller creates the slots; the
-  // answerer fills the ones that arrived with the offer.
+  // Put our mic, camera and screen into the call. The caller creates the
+  // slots; the answerer fills the ones that arrived with the offer.
   function attachLocal(entry) {
     const { pc } = entry;
     S.localStream.getAudioTracks().forEach((t) => pc.addTrack(t, S.localStream));
-    let slot = pc.getTransceivers().find((t) => t.receiver.track.kind === "video");
-    if (slot) slot.direction = "sendrecv";
-    else slot = pc.addTransceiver("video", { direction: "sendrecv" });
-    entry.videoSender = slot.sender;
+    const slots = pc.getTransceivers().filter((t) => t.receiver.track.kind === "video");
+    while (slots.length < 2) slots.push(pc.addTransceiver("video", { direction: "sendrecv" }));
+    for (const slot of slots) slot.direction = "sendrecv";
+    entry.cameraSender = slots[0].sender;
+    entry.screenSender = slots[1].sender;
     const cam = S.camStream?.getVideoTracks()[0];
-    if (cam) slot.sender.replaceTrack(cam);
+    if (cam) entry.cameraSender.replaceTrack(cam);
+    const screen = S.screenStream?.getVideoTracks()[0];
+    if (screen) entry.screenSender.replaceTrack(screen);
+  }
+
+  // Bandwidth caps per stream: camera 500 kbps; screen 1.5 Mbps at up to
+  // 15 fps (sharp text matters more than smooth motion). Applied once the
+  // call is connected, when the encoding parameters exist.
+  const CAPS = { cameraSender: { maxBitrate: 500_000 }, screenSender: { maxBitrate: 1_500_000, maxFramerate: 15 } };
+
+  function applyCaps(entry) {
+    for (const [slot, cap] of Object.entries(CAPS)) {
+      const sender = entry[slot];
+      const params = sender?.getParameters();
+      if (!params?.encodings?.length) continue;
+      Object.assign(params.encodings[0], cap);
+      sender.setParameters(params).catch((e) => console.warn("[voice] caps", e));
+    }
   }
 
   async function callPeer(id) {
@@ -787,13 +821,13 @@
     renderStage();
   }
 
-  const sendVoiceState = () => send({ type: "voice_state", muted: S.muted, video: !!S.camStream });
+  const sendVoiceState = () => send({ type: "voice_state", muted: S.muted, video: !!S.camStream, screen: !!S.screenStream });
 
   async function toggleCamera() {
     if (S.camStream) {
       S.camStream.getTracks().forEach((t) => t.stop());
       S.camStream = null;
-      for (const e of S.pcs.values()) e.videoSender?.replaceTrack(null);
+      for (const e of S.pcs.values()) e.cameraSender?.replaceTrack(null);
     } else {
       try {
         S.camStream = await navigator.mediaDevices.getUserMedia({
@@ -804,33 +838,68 @@
         return;
       }
       const cam = S.camStream.getVideoTracks()[0];
-      for (const e of S.pcs.values()) e.videoSender?.replaceTrack(cam);
+      for (const e of S.pcs.values()) e.cameraSender?.replaceTrack(cam);
     }
     sendVoiceState();
     renderVoice();
     renderStage();
   }
 
-  // Video tiles above the chat for everyone in our room with their camera on.
+  async function toggleScreen() {
+    if (S.screenStream) return stopScreen();
+    try {
+      S.screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: { ideal: 15, max: 15 } }, audio: false });
+    } catch (e) {
+      // Closing the browser's picker is not an error worth reporting.
+      if (e.name !== "NotAllowedError" && e.name !== "AbortError") {
+        handle({ type: "notice", text: `Couldn't share your screen: ${e.message}` });
+      }
+      return;
+    }
+    const track = S.screenStream.getVideoTracks()[0];
+    track.contentHint = "detail";
+    // The browser's own "Stop sharing" button ends the track.
+    track.addEventListener("ended", stopScreen);
+    for (const e of S.pcs.values()) e.screenSender?.replaceTrack(track);
+    sendVoiceState();
+    renderVoice();
+    renderStage();
+  }
+
+  function stopScreen() {
+    if (!S.screenStream) return;
+    S.screenStream.getTracks().forEach((t) => t.stop());
+    S.screenStream = null;
+    for (const e of S.pcs.values()) e.screenSender?.replaceTrack(null);
+    sendVoiceState();
+    renderVoice();
+    renderStage();
+  }
+
+  // Video tiles above the chat: screen shares (full width, first) and cameras.
   // <video> elements are reused so playback doesn't restart on every update.
   function renderStage() {
     const stage = $("stage");
     const tiles = [];
     if (S.myVoice && S.me) {
-      if (S.camStream) tiles.push({ id: S.me.id, name: `${S.me.name} (you)`, stream: S.camStream, self: true });
+      if (S.screenStream) tiles.push({ key: `${S.me.id}:screen`, name: "Your screen", stream: S.screenStream, screen: true });
+      if (S.camStream) tiles.push({ key: S.me.id, name: `${S.me.name} (you)`, stream: S.camStream, self: true });
       for (const [id, e] of S.pcs) {
         const p = S.voice.find((v) => v.id === id);
-        if (p && p.video && e.video) tiles.push({ id, name: p.name, stream: e.video });
+        if (p && p.screen && e.screen) tiles.push({ key: `${id}:screen`, name: `${p.name}'s screen`, stream: e.screen, screen: true });
+        if (p && p.video && e.video) tiles.push({ key: id, name: p.name, stream: e.video });
       }
     }
-    const keep = new Set(tiles.map((t) => t.id));
-    for (const el of [...stage.children]) if (!keep.has(el.dataset.voiceId)) el.remove();
+    const keep = new Set(tiles.map((t) => t.key));
+    for (const el of [...stage.children]) if (!keep.has(el.dataset.key)) el.remove();
     for (const t of tiles) {
-      let el = [...stage.children].find((c) => c.dataset.voiceId === t.id);
+      let el = [...stage.children].find((c) => c.dataset.key === t.key);
       if (!el) {
         el = document.createElement("div");
-        el.className = "tile";
-        el.dataset.voiceId = t.id;
+        el.className = t.screen ? "tile screen" : "tile";
+        el.dataset.key = t.key;
+        // Camera tiles get the speaking ring; screen tiles don't.
+        if (!t.screen) el.dataset.voiceId = t.key;
         el.innerHTML = `<video autoplay playsinline muted></video><span class="tile-name"></span>`;
         stage.appendChild(el);
       }
@@ -840,6 +909,7 @@
       el.querySelector(".tile-name").textContent = t.name;
     }
     stage.dataset.count = tiles.length;
+    stage.classList.toggle("has-screen", tiles.some((t) => t.screen));
     stage.hidden = !tiles.length;
   }
 
@@ -1055,6 +1125,7 @@
   $("voicebar").addEventListener("click", (e) => {
     if (e.target.closest("#hangBtn")) leaveVoice();
     else if (e.target.closest("#camBtn")) toggleCamera();
+    else if (e.target.closest("#screenBtn")) toggleScreen();
   });
 
   // ── GIF picker ──
