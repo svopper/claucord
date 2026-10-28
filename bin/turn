@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Runs a TURN server on this machine so voice and video work for people
+# connecting over the internet. See "Voice over the internet" in the README.
+#
+# Reads .env (CHAT_TURN_SECRET, TURN_PUBLIC_IP and optionally TURN_LAN_IP)
+# and needs coturn installed (macOS: `brew install coturn`).
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [ -f .env ]; then set -a; . ./.env; set +a; fi
+
+if ! command -v turnserver >/dev/null; then
+  echo "turnserver not found. Install coturn first (macOS: brew install coturn)." >&2
+  exit 1
+fi
+if [ -z "${CHAT_TURN_SECRET:-}" ] || [ -z "${TURN_PUBLIC_IP:-}" ]; then
+  echo "Set CHAT_TURN_SECRET and TURN_PUBLIC_IP in .env (see the README)." >&2
+  exit 1
+fi
+
+# This machine's address on the home network: what the router forwards to.
+if [ -z "${TURN_LAN_IP:-}" ]; then
+  iface="$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')"
+  TURN_LAN_IP="$( (ipconfig getifaddr "${iface:-en0}" || hostname -I | awk '{print $1}') 2>/dev/null)"
+fi
+if [ -z "$TURN_LAN_IP" ]; then
+  echo "Couldn't find this machine's LAN address; set TURN_LAN_IP in .env." >&2
+  exit 1
+fi
+
+echo "TURN on $TURN_LAN_IP:3478 (public $TURN_PUBLIC_IP), relay ports 49160-49200/udp"
+
+# A TURN server forwards traffic for anyone holding a login, so it may not
+# reach into the home network (private ranges are denied), except this
+# machine, whose own browser takes part in calls.
+exec turnserver \
+  --listening-ip="$TURN_LAN_IP" --relay-ip="$TURN_LAN_IP" \
+  --listening-port=3478 \
+  --min-port=49160 --max-port=49200 \
+  --external-ip="$TURN_PUBLIC_IP/$TURN_LAN_IP" \
+  --realm=beam-chat \
+  --use-auth-secret --static-auth-secret="$CHAT_TURN_SECRET" \
+  --fingerprint --no-tls --no-multicast-peers \
+  --denied-peer-ip=0.0.0.0-0.255.255.255 \
+  --denied-peer-ip=10.0.0.0-10.255.255.255 \
+  --denied-peer-ip=100.64.0.0-100.127.255.255 \
+  --denied-peer-ip=127.0.0.0-127.255.255.255 \
+  --denied-peer-ip=169.254.0.0-169.254.255.255 \
+  --denied-peer-ip=172.16.0.0-172.31.255.255 \
+  --denied-peer-ip=192.168.0.0-192.168.255.255 \
+  --allowed-peer-ip="$TURN_LAN_IP" \
+  --log-file=stdout --simple-log

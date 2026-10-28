@@ -1,5 +1,10 @@
 # Postgres for BEAM Chat. Start it with `docker compose up -d`.
 # It listens on 127.0.0.1:5433 so it doesn't clash with a Postgres on 5432.
+#
+# Optional, Linux only: a TURN server, so voice and video work for people on
+# other networks. Start it with `docker compose --profile turn up -d` after
+# filling in .env (see "Voice over the internet" in the README). On macOS use
+# `bin/turn` instead: Docker Desktop hides the real addresses TURN needs to see.
 services:
   db:
     image: postgres:18
@@ -18,6 +23,45 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+
+  turn:
+    image: coturn/coturn:4.7
+    profiles: ["turn"]
+    # Host networking: TURN must see real source addresses, and Docker's port
+    # mapping would hide them.
+    network_mode: host
+    environment:
+      CHAT_TURN_SECRET: ${CHAT_TURN_SECRET:-}
+      TURN_PUBLIC_IP: ${TURN_PUBLIC_IP:-}
+      TURN_LAN_IP: ${TURN_LAN_IP:-}
+    # A TURN server forwards traffic for anyone holding a login, so it may not
+    # reach into your home network (private ranges are denied), except the
+    # machine running the chat (TURN_LAN_IP), whose browser takes part in calls.
+    entrypoint:
+      - sh
+      - -c
+      - |
+        if [ -z "$$CHAT_TURN_SECRET" ] || [ -z "$$TURN_PUBLIC_IP" ]; then
+          echo "Set CHAT_TURN_SECRET and TURN_PUBLIC_IP in .env (see the README)" >&2
+          exit 1
+        fi
+        exec turnserver \
+          --listening-port=3478 \
+          --min-port=49160 --max-port=49200 \
+          --external-ip="$$TURN_PUBLIC_IP$${TURN_LAN_IP:+/$$TURN_LAN_IP}" \
+          --realm=beam-chat \
+          --use-auth-secret --static-auth-secret="$$CHAT_TURN_SECRET" \
+          --fingerprint --no-cli --no-tls --no-dtls --no-multicast-peers \
+          --denied-peer-ip=0.0.0.0-0.255.255.255 \
+          --denied-peer-ip=10.0.0.0-10.255.255.255 \
+          --denied-peer-ip=100.64.0.0-100.127.255.255 \
+          --denied-peer-ip=127.0.0.0-127.255.255.255 \
+          --denied-peer-ip=169.254.0.0-169.254.255.255 \
+          --denied-peer-ip=172.16.0.0-172.31.255.255 \
+          --denied-peer-ip=192.168.0.0-192.168.255.255 \
+          $${TURN_LAN_IP:+--allowed-peer-ip=$$TURN_LAN_IP} \
+          --log-file=stdout
+    restart: unless-stopped
 
 volumes:
   beam_chat_data:
