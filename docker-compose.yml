@@ -1,0 +1,23 @@
+# Postgres for BEAM Chat. Start it with `docker compose up -d`.
+# It listens on 127.0.0.1:5433 so it doesn't clash with a Postgres on 5432.
+services:
+  db:
+    image: postgres:18
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: beam_chat
+    # Each chat node keeps a small connection pool; allow big clusters.
+    command: ["postgres", "-c", "max_connections=500"]
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - beam_chat_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "beam_chat"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+volumes:
+  beam_chat_data:
