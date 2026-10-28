@@ -3,7 +3,7 @@ defmodule Demo.Chat.Presence do
   Who is online, and on which node, derived purely from `:pg` groups:
 
     * every WebSocket process joins `{:presence, name, color}`
-    * every chat node's Presence process joins `{:chat_node, http_port, https_port}`
+    * every chat node's Presence process joins `{:chat_node, http_port, https_port, public_url}`
     * every voice participant joins `{:voice, room, id, name, color, muted?, camera?, screen?}`
 
   `:pg` removes members automatically when their process or node dies, and
@@ -17,14 +17,19 @@ defmodule Demo.Chat.Presence do
   @doc "Local WebSocket processes that receive presence updates."
   def subscriber_group, do: :chat_sockets
 
+  @doc "The public URLs nodes advertise (`--public-url`)."
+  def public_urls do
+    for {:chat_node, _port, _https_port, url} <- :pg.which_groups(), url != nil, do: url
+  end
+
   def snapshot do
     groups = :pg.which_groups()
 
     nodes =
-      for {:chat_node, port, https_port} = g <- groups, pid <- :pg.get_members(g) do
-        %{name: node(pid), port: port, https_port: https_port}
+      for {:chat_node, port, https_port, url} = g <- groups, pid <- :pg.get_members(g) do
+        %{name: node(pid), port: port, https_port: https_port, url: url}
       end
-      |> Enum.sort_by(& &1.port)
+      |> Enum.sort_by(&{&1.url || "", &1.port})
 
     users =
       for {:presence, name, color} = g <- groups, pid <- :pg.get_members(g) do
@@ -54,8 +59,8 @@ defmodule Demo.Chat.Presence do
   end
 
   @impl true
-  def init({port, https_port}) do
-    :ok = :pg.join({:chat_node, port, https_port}, self())
+  def init(%{port: port, https_port: https_port, url: url}) do
+    :ok = :pg.join({:chat_node, port, https_port, url}, self())
     {ref, _groups} = :pg.monitor_scope()
     :ok = :net_kernel.monitor_nodes(true)
     {:ok, %{ref: ref, timer: nil}}

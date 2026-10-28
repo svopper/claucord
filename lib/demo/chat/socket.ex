@@ -2,12 +2,25 @@ defmodule Demo.Chat.Socket do
   @moduledoc "One process per connected browser tab."
   @behaviour WebSock
 
-  alias Demo.Chat.{Channel, Directory, Presence}
+  alias Demo.Chat.{Channel, Config, Directory, Presence}
 
   @colors ~w(#f47b67 #f8a532 #48b784 #45ddc0 #5865f2 #9b84ec #eb459e #3ba5f0)
 
+  @auth_timeout :timer.seconds(10)
+
+  # With an invite code configured, the browser must send it as its first
+  # message (not in the URL, where proxies would log it) before it joins.
   @impl true
   def init(%{name: name}) do
+    if Config.invite_code() do
+      Process.send_after(self(), :auth_timeout, @auth_timeout)
+      {:ok, %{pending: name}}
+    else
+      join(name)
+    end
+  end
+
+  defp join(name) do
     name = clean_name(name)
     color = Enum.at(@colors, :erlang.phash2(name, length(@colors)))
 
@@ -27,7 +40,8 @@ defmodule Demo.Chat.Socket do
         type: "welcome",
         you: %{id: id, name: name, color: color, node: node()},
         channels: Directory.text_channels(),
-        voice_rooms: Directory.voice_rooms()
+        voice_rooms: Directory.voice_rooms(),
+        ice_servers: Config.ice_servers(id)
       })
 
     state = %{
@@ -46,6 +60,21 @@ defmodule Demo.Chat.Socket do
   end
 
   @impl true
+  def handle_in({text, opcode: :text}, %{pending: name} = state) do
+    case JSON.decode(text) do
+      {:ok, %{"type" => "auth", "invite" => invite}} ->
+        if Config.invite_ok?(invite) do
+          join(name)
+        else
+          error = JSON.encode!(%{type: "auth_error", text: "That invite code isn't right."})
+          {:stop, :normal, {4001, "invite"}, [{:text, error}], state}
+        end
+
+      _ ->
+        {:ok, state}
+    end
+  end
+
   def handle_in({text, opcode: :text}, state) do
     case JSON.decode(text) do
       {:ok, msg} -> handle_client(msg, state)
@@ -60,6 +89,7 @@ defmodule Demo.Chat.Socket do
     push(event, subscribe(state, Enum.map(event.channels, & &1.name)))
   end
 
+  def handle_info(:auth_timeout, %{pending: _} = state), do: {:stop, :normal, state}
   def handle_info({:chat_event, event}, state), do: push(event, state)
   def handle_info(_other, state), do: {:ok, state}
 
@@ -197,14 +227,15 @@ defmodule Demo.Chat.Socket do
   # ── Slash commands ───────────────────────────────────────────────────
 
   defp command("help", state) do
-    notice(
-      """
-      /crash: crash this channel's process; its supervisor restarts it
-      /halt: shut down the node you're connected to; you fail over to another one
-      /where: show where this channel's process runs
-      """,
-      state
-    )
+    demo =
+      if Config.demo_commands?(),
+        do: """
+        /crash: crash this channel's process; its supervisor restarts it
+        /halt: shut down the node you're connected to; you fail over to another one
+        """,
+        else: ""
+
+    notice(demo <> "/where: show where this channel's process runs", state)
   end
 
   defp command("where", state) do
@@ -212,7 +243,17 @@ defmodule Demo.Chat.Socket do
     notice("##{state.channel} is #{inspect(pid)} on #{node(pid)}. You are on #{node()}.", state)
   end
 
-  defp command("crash", state) do
+  # /crash and /halt let anyone break things on purpose, so a deployment can
+  # turn them off with CHAT_DEMO_COMMANDS=false.
+  defp command(cmd, state) when cmd in ["crash", "halt"] do
+    if Config.demo_commands?(),
+      do: demo_command(cmd, state),
+      else: notice("/#{cmd} is turned off on this server.", state)
+  end
+
+  defp command(other, state), do: notice("Unknown command /#{other}. Try /help.", state)
+
+  defp demo_command("crash", state) do
     c = state.channel
     old = Channel.ensure(c)
     Channel.crash(c)
@@ -228,7 +269,7 @@ defmodule Demo.Chat.Socket do
     {:ok, state}
   end
 
-  defp command("halt", state) do
+  defp demo_command("halt", state) do
     if Application.get_env(:demo, :chat_primary, false) do
       notice(
         "This is the primary node that started the cluster, so connect to another node first.",
@@ -248,8 +289,6 @@ defmodule Demo.Chat.Socket do
       {:ok, state}
     end
   end
-
-  defp command(other, state), do: notice("Unknown command /#{other}. Try /help.", state)
 
   # ── Helpers ──────────────────────────────────────────────────────────
 

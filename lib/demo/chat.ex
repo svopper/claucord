@@ -23,6 +23,7 @@ defmodule Demo.Chat do
   def default_voice_rooms, do: @voice_rooms
   def default_channels, do: @channels
 
+  @doc "The default node name for a node on this machine: `chat4000@127.0.0.1`."
   def node_name(port), do: :"chat#{port}@127.0.0.1"
 
   @doc "Addresses other devices can use to reach a server listening on `ip`."
@@ -44,13 +45,21 @@ defmodule Demo.Chat do
 
   @doc """
   Starts the chat (HTTP server, presence, channel supervisor) on this node.
-  `ip` is the interface the web server listens on, e.g. `{0, 0, 0, 0}` for all.
-  `tls` (`%{port: _, certfile: _, keyfile: _}`) adds an HTTPS listener.
+
+  Options:
+    * `:port` - HTTP port (required)
+    * `:ip` - interface the web server listens on, e.g. `{0, 0, 0, 0}` for all
+    * `:tls` - `%{port: _, certfile: _, keyfile: _}` adds an HTTPS listener
+    * `:public_url` - how browsers reach this node, e.g. `https://b.chat.example.com`;
+      without it they use the page's own hostname and this node's port
+    * `:join` - node names to stay connected to (see `Demo.Chat.Connector`)
   """
-  def start(port, ip \\ {127, 0, 0, 1}, tls \\ nil) do
+  def start(opts) do
+    port = Keyword.fetch!(opts, :port)
+    tls = opts[:tls]
     Application.put_env(:demo, :chat_port, port)
 
-    case Supervisor.start_child(Demo.Supervisor, {Demo.Chat.Supervisor, {port, ip, tls}}) do
+    case Supervisor.start_child(Demo.Supervisor, {Demo.Chat.Supervisor, opts}) do
       {:ok, _} ->
         :ok
 
@@ -71,7 +80,11 @@ defmodule Demo.Chat.Supervisor do
   def start_link(args), do: Supervisor.start_link(__MODULE__, args, name: __MODULE__)
 
   @impl true
-  def init({port, ip, tls}) do
+  def init(opts) do
+    port = Keyword.fetch!(opts, :port)
+    ip = opts[:ip] || {127, 0, 0, 1}
+    tls = opts[:tls]
+
     https =
       if tls do
         bandit =
@@ -94,7 +107,8 @@ defmodule Demo.Chat.Supervisor do
         {DynamicSupervisor,
          name: Demo.Chat.ChannelSup, strategy: :one_for_one, max_restarts: 100},
         Demo.Chat.Directory,
-        {Demo.Chat.Presence, {port, tls && tls.port}},
+        {Demo.Chat.Presence, %{port: port, https_port: tls && tls.port, url: opts[:public_url]}},
+        {Demo.Chat.Connector, opts[:join] || []},
         Demo.Chat.Gifs,
         Supervisor.child_spec({Bandit, plug: Demo.Chat.Router, ip: ip, port: port}, id: :http)
       ] ++ https
